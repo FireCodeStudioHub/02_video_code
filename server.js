@@ -1,39 +1,58 @@
 const http = require('http');
-const sanitizeHtml = require('sanitize-html');
+const unzipper = require('unzipper');
+const path = require('path');
+const fs = require('fs');
 
-// Secure server with SVG sanitization
+// Define a directory to extract the files
+const extractDir = path.join(__dirname, 'uploads');
+
+// Vulnerable server that accepts and unpacks ZIP files
 const server = http.createServer((req, res) => {
     const { method, url, headers } = req;
 
     console.log(`Received ${method} request on ${url}`);
     console.log(`Content-Type: ${headers['content-type']}`);
 
-    let body = '';
-
-    req.on('data', chunk => {
-        body += chunk;
-    });
-
-    req.on('end', () => {
-        if (headers['content-type'] === 'image/svg+xml') {
-            // Sanitize the SVG content before returning it
-            const sanitizedSVG = sanitizeHtml(body, {
-                allowedTags: ['svg', 'rect'],
-                allowedAttributes: {
-                    'rect': ['width', 'height', 'style'],
-                },
-            });
-
-            res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
-            res.end(sanitizedSVG);  // Now safe to return
-        } else {
-            res.writeHead(400);
-            res.end('Unsupported Content-Type');
+    if (headers['content-type'] === 'application/zip') {
+        // Ensure the extraction directory exists
+        if (!fs.existsSync(extractDir)) {
+            fs.mkdirSync(extractDir);
         }
-    });
+
+        // Handle ZIP file extraction without path normalization (vulnerable to ZIP Slip)
+        req.pipe(unzipper.Parse())
+            .on('entry', (entry) => {
+                // Directly use the path without normalizing or sanitizing it
+                const filePath = path.join(extractDir, entry.path);
+
+                console.log(`Extracting file to: ${filePath}`);
+                
+                // Vulnerably write files, even if they attempt to overwrite outside of `uploads`
+                entry.pipe(fs.createWriteStream(filePath))
+                    .on('finish', () => {
+                        console.log(`File extracted to: ${filePath}`);
+                    })
+                    .on('error', (err) => {
+                        console.error(`Error writing file to: ${filePath}`, err);
+                    });
+            })
+            .on('close', () => {
+                console.log('ZIP file extracted successfully');
+                res.writeHead(200);
+                res.end('ZIP file unpacked and saved');
+            })
+            .on('error', (err) => {
+                console.error('Error extracting ZIP file:', err);
+                res.writeHead(500);
+                res.end('Error unpacking ZIP file');
+            });
+    } else {
+        res.writeHead(400);
+        res.end('Unsupported Content-Type');
+    }
 });
 
-// Start the secure server
+// Start the vulnerable server
 server.listen(3000, () => {
-    console.log('Secure server running on http://localhost:3000');
+    console.log('Vulnerable server running on http://localhost:3000');
 });
