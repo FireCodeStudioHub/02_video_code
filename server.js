@@ -1,8 +1,7 @@
 const http = require('http');
-const fs = require('fs');
-const path = require('path');
+const sanitizeHtml = require('sanitize-html');
 
-// Vulnerable server with file handling (images, SVGs, ZIPs)
+// Secure server with SVG sanitization
 const server = http.createServer((req, res) => {
     const { method, url, headers } = req;
 
@@ -16,18 +15,17 @@ const server = http.createServer((req, res) => {
     });
 
     req.on('end', () => {
-        // Allow file types like images, SVGs, or ZIP files
-        if (headers['content-type'] === 'image/png' || headers['content-type'] === 'image/jpeg') {
-            res.writeHead(200, { 'Content-Type': 'image/png' });
-            res.end('Image received successfully');  // We won't actually process the image in this example.
-        } else if (headers['content-type'] === 'application/zip') {
-            // Vulnerable ZIP file handling (this is intentionally weak)
-            res.writeHead(200);
-            res.end('ZIP file received, but not processed.');
-        } else if (headers['content-type'] === 'image/svg+xml') {
-            // Potentially dangerous SVG handling without sanitization
+        if (headers['content-type'] === 'image/svg+xml') {
+            // Sanitize the SVG content before returning it
+            const sanitizedSVG = sanitizeHtml(body, {
+                allowedTags: ['svg', 'rect'],
+                allowedAttributes: {
+                    'rect': ['width', 'height', 'style'],
+                },
+            });
+
             res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
-            res.end(body);  // Simply return the SVG back, vulnerable to XSS
+            res.end(sanitizedSVG);  // Now safe to return
         } else {
             res.writeHead(400);
             res.end('Unsupported Content-Type');
@@ -35,7 +33,7 @@ const server = http.createServer((req, res) => {
     });
 });
 
-// Start the server
+// Start the secure server
 server.listen(3000, () => {
-    console.log('Server running on http://localhost:3000');
+    console.log('Secure server running on http://localhost:3000');
 });
